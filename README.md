@@ -70,7 +70,9 @@ http://localhost:8091/ui - kleine Testoberflaeche fuer das Gesamtsystem
 
 - Login per Benutzername/Passwort (Demo-User aus Keycloak)
 - Aufgaben anlegen, erledigen, loeschen - direkt ueber den **Delphi-Task-Service**
-  (muss laufen, Port 8090)
+  (Port 8090, per `TASK_SERVICE_URL` aenderbar). Ist der nicht erreichbar,
+  schaltet die Seite in den **Simulationsmodus**: dieser Service uebernimmt die
+  Task-Endpoints (`/ui/sim/tasks`) und published dieselben Events wie Delphi
 - History + CSV-Export aus diesem Service; jede Aenderung an einer Aufgabe
   erscheint hier, nachdem das Event ueber RabbitMQ angekommen ist
 
