@@ -22,6 +22,9 @@ from app.auth import OIDC_ISSUER
 
 OIDC_CLIENT_ID = os.environ.get("OIDC_CLIENT_ID", "task-mgmt-client")
 TASK_SERVICE_URL = os.environ.get("TASK_SERVICE_URL", "http://localhost:8090")
+# Die Seite sucht den Delphi-Service der Reihe nach unter diesen Adressen. 8095 ist
+# der Ausweich-Port aus dem Delphi-Repo (run.cmd/start.cmd), falls 8090 belegt ist.
+_TASK_SERVICE_CANDIDATES = list(dict.fromkeys([TASK_SERVICE_URL, "http://localhost:8090", "http://localhost:8095"]))
 _INDEX_HTML = Path(__file__).parent / "static" / "index.html"
 
 router = APIRouter(prefix="/ui", include_in_schema=False)
@@ -34,7 +37,7 @@ def index() -> FileResponse:
 
 @router.get("/config")
 def config() -> dict:
-    return {"taskServiceUrl": TASK_SERVICE_URL}
+    return {"taskServiceUrls": _TASK_SERVICE_CANDIDATES}
 
 
 class LoginRequest(BaseModel):
