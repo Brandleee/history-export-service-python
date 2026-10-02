@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse, Response
 from app.auth import CurrentUser, get_current_user
 from app.consumer import start_consumer_thread
 from app.store import HistoryEntry, store
+from app.ui import router as ui_router
 
 
 @asynccontextmanager
@@ -27,6 +28,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="History/Export-Service", lifespan=lifespan)
+app.include_router(ui_router)
 
 
 def _entry_to_dict(entry: HistoryEntry) -> dict:

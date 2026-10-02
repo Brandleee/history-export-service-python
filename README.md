@@ -61,6 +61,18 @@ Konfiguration per Umgebungsvariable (Defaults passen zur gemeinsamen Infra):
 | `RABBITMQ_HOST` / `RABBITMQ_PORT` | `localhost` / `5672` |
 | `OIDC_JWKS_URL` | `http://localhost:8082/realms/task-mgmt/protocol/openid-connect/certs` |
 | `OIDC_ISSUER` | `http://localhost:8082/realms/task-mgmt` |
+| `TASK_SERVICE_URL` | `http://localhost:8090` (nur fuer die Web-Oberflaeche) |
+
+## Web-Oberflaeche
+
+http://localhost:8091/ui - kleine Testoberflaeche fuer das Gesamtsystem
+(nicht Teil des Vertrags, deshalb nicht in `/docs`):
+
+- Login per Benutzername/Passwort (Demo-User aus Keycloak)
+- Aufgaben anlegen, erledigen, loeschen - direkt ueber den **Delphi-Task-Service**
+  (muss laufen, Port 8090)
+- History + CSV-Export aus diesem Service; jede Aenderung an einer Aufgabe
+  erscheint hier, nachdem das Event ueber RabbitMQ angekommen ist
 
 ## Manuell testen
 

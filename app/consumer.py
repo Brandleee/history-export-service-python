@@ -68,6 +68,12 @@ def _run_forever() -> None:
         except pika.exceptions.AMQPConnectionError as exc:
             logger.warning("RabbitMQ nicht erreichbar (%s), erneuter Versuch in 3s ...", exc)
             time.sleep(3)
+        except Exception:
+            # Ohne diesen Fall beendet sich der Thread bei jedem anderen Fehler
+            # (z.B. Kanal vom Broker geschlossen, waehrend RabbitMQ noch hochfaehrt)
+            # still - der Service laeuft weiter, bekommt aber nie mehr Events.
+            logger.exception("Consumer-Fehler, erneuter Versuch in 3s ...")
+            time.sleep(3)
 
 
 def start_consumer_thread() -> threading.Thread:
