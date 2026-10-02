@@ -7,6 +7,15 @@ Grundgerueests liegt auf dem asynchronen Event-Fluss, nicht auf Persistenz.
 
 import threading
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+
+
+def _parse_time(value: str) -> datetime:
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.min.replace(tzinfo=timezone.utc)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 @dataclass
@@ -33,7 +42,9 @@ class HistoryStore:
         with self._lock:
             matches = [e for e in self._entries if e.owner_user_id == owner_user_id]
         # Neueste zuerst - passend zum Vertrag (contracts/openapi/history-export-service.yaml).
-        return sorted(matches, key=lambda e: e.occurred_at, reverse=True)
+        # Nach echtem Zeitpunkt sortieren, nicht als Text - die Services schicken
+        # unterschiedliche Zeitzonen (Delphi +02:00, Python +00:00).
+        return sorted(matches, key=lambda e: _parse_time(e.occurred_at), reverse=True)
 
 
 store = HistoryStore()

@@ -46,6 +46,16 @@ und `asyncapi/task-events.yaml`. Bei Aenderungen zuerst dort anpassen.
 Voraussetzung: gemeinsame Infrastruktur laeuft (siehe
 [`task-management-contracts/README.md`](https://github.com/LevinWiederkehr/task-management-contracts#readme)).
 
+Am einfachsten per `start.cmd` (richtet beim ersten Mal die venv ein). Laeuft
+der Delphi-Task-Service nicht auf 8090, dessen Port mitgeben - z.B. wenn 8090
+belegt ist und der Task-Service mit `start.cmd 8095` gestartet wurde:
+
+```
+start.cmd 8095
+```
+
+Oder manuell:
+
 ```
 python -m venv .venv
 .venv\Scripts\activate
@@ -70,9 +80,7 @@ http://localhost:8091/ui - kleine Testoberflaeche fuer das Gesamtsystem
 
 - Login per Benutzername/Passwort (Demo-User aus Keycloak)
 - Aufgaben anlegen, erledigen, loeschen - direkt ueber den **Delphi-Task-Service**
-  (Port 8090, per `TASK_SERVICE_URL` aenderbar). Ist der nicht erreichbar,
-  schaltet die Seite in den **Simulationsmodus**: dieser Service uebernimmt die
-  Task-Endpoints (`/ui/sim/tasks`) und published dieselben Events wie Delphi
+  (muss laufen; Port 8090, per `TASK_SERVICE_URL` bzw. `start.cmd <Port>` aenderbar)
 - History + CSV-Export aus diesem Service; jede Aenderung an einer Aufgabe
   erscheint hier, nachdem das Event ueber RabbitMQ angekommen ist
 
