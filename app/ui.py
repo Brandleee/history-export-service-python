@@ -1,4 +1,9 @@
+"""Kleine Web-Oberflaeche fuer das Gesamtsystem (nicht Teil des Vertrags).
 
+Der Browser spricht direkt mit dem Delphi-Task-Service und mit diesem
+Service; nur der Login laeuft ueber /ui/login, damit das Passwort nicht im
+Browser-JavaScript gegen Keycloak geschickt werden muss.
+"""
 
 import os
 from pathlib import Path
@@ -11,6 +16,8 @@ from pydantic import BaseModel
 from app.auth import OIDC_ISSUER
 
 OIDC_CLIENT_ID = os.environ.get("OIDC_CLIENT_ID", "task-mgmt-client")
+# Im Container ist Keycloak unter einem anderen Host erreichbar als im Issuer steht.
+OIDC_TOKEN_URL = os.environ.get("OIDC_TOKEN_URL", f"{OIDC_ISSUER}/protocol/openid-connect/token")
 TASK_SERVICE_URL = os.environ.get("TASK_SERVICE_URL", "http://localhost:8090")
 # Die Seite sucht den Delphi-Service der Reihe nach unter diesen Adressen. 8095 ist
 # der Ausweich-Port aus dem Delphi-Repo (run.cmd/start.cmd), falls 8090 belegt ist.
@@ -39,7 +46,7 @@ class LoginRequest(BaseModel):
 def login(credentials: LoginRequest) -> JSONResponse:
     try:
         response = httpx.post(
-            f"{OIDC_ISSUER}/protocol/openid-connect/token",
+            OIDC_TOKEN_URL,
             data={
                 "grant_type": "password",
                 "client_id": OIDC_CLIENT_ID,

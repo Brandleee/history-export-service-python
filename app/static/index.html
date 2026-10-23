@@ -71,14 +71,14 @@
 
     <section class="card">
       <div class="row head">
-        <strong>History</strong> <small>History/Export-Service (Python)</small>
+        <strong>History</strong> <small>History/Export-Service (Python, <span id="history-instance"></span>)</small>
         <span style="flex:1"></span>
         <button class="secondary small" id="refresh">Aktualisieren</button>
         <button class="secondary small" id="csv">CSV herunterladen</button>
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Zeitpunkt</th><th>Event</th><th>Titel</th><th>Status</th></tr></thead>
+          <thead><tr><th>Zeitpunkt</th><th>Event</th><th>Titel</th><th>Status</th><th title="Korrelations-ID des ausloesenden Requests">Korrelation</th></tr></thead>
           <tbody id="history"></tbody>
         </table>
       </div>
@@ -105,7 +105,11 @@ async function call(url, options = {}) {
   try {
     res = await fetch(url, {
       ...options,
-      headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
+      headers: {
+        "Content-Type": "application/json",
+        "X-Correlation-ID": crypto.randomUUID(),
+        ...(token ? { Authorization: "Bearer " + token } : {}),
+      },
     });
   } catch {
     throw new Error(url.startsWith(taskServiceUrl)
@@ -119,7 +123,7 @@ async function call(url, options = {}) {
   }
   return res;
 }
-const tasksApi = (path, options) => call(taskServiceUrl + path, options);
+const tasksApi = (path, options) => call(taskServiceUrl + "/v1" + path, options);
 
 // Sucht den Delphi-Task-Service unter den bekannten Adressen. Prueft per /health,
 // dass wirklich er antwortet - auf 8090 kann auch ein anderes Programm laufen.
@@ -166,12 +170,15 @@ async function loadTasks() {
 async function loadHistory() {
   $("history-error").textContent = "";
   try {
-    const entries = await (await call("/history")).json();
+    const res = await call("/v1/history");
+    const entries = await res.json();
+    $("history-instance").textContent = "Instanz " + (res.headers.get("X-Instance") || "?");
     $("history").replaceChildren(...entries.map((e) => el("tr", {},
       el("td", { textContent: new Date(e.occurredAt).toLocaleString("de-CH") }),
       el("td", { textContent: e.eventType }),
       el("td", { className: "title", textContent: e.title }),
-      el("td", {}, el("span", { className: "badge " + e.status, textContent: e.status })))));
+      el("td", {}, el("span", { className: "badge " + e.status, textContent: e.status })),
+      el("td", { className: "muted", title: e.correlationId || "", textContent: (e.correlationId || "").slice(0, 8) }))));
     $("history-empty").classList.toggle("hidden", entries.length > 0);
   } catch (err) { $("history-error").textContent = err.message; }
 }
@@ -212,7 +219,7 @@ $("task-form").addEventListener("submit", async (ev) => {
 
 $("csv").addEventListener("click", async () => {
   try {
-    const blob = await (await call("/export?format=csv")).blob();
+    const blob = await (await call("/v1/export?format=csv")).blob();
     const a = el("a", { href: URL.createObjectURL(blob), download: "history.csv" });
     a.click();
     URL.revokeObjectURL(a.href);

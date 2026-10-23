@@ -2,100 +2,99 @@
 
 History/Export-Service des Task-Management-Systems - konsumiert asynchron
 die Task-Events des Task-Service (separates Repo, Delphi) und bietet
-Lesezugriff + Export darauf. Geschrieben in Python (FastAPI), **lauffaehiges
-Grundgerueest**, kein fertiges Produkt.
+Lesezugriff + Export darauf. Geschrieben in Python (FastAPI).
 
 Der Vertrag (Endpoints, Felder, Event-Format) liegt im separaten Repo
-[`task-management-contracts`](https://github.com/LevinWiederkehr/task-management-contracts) - siehe dort `openapi/history-export-service.yaml`
-und `asyncapi/task-events.yaml`. Bei Aenderungen zuerst dort anpassen.
+[`task-management-contracts`](https://github.com/LevinWiederkehr/task-management-contracts) -
+siehe dort `openapi/history-export-service.yaml` und `asyncapi/task-events.yaml`
+(implementierte Version: **1.1.0**). Bei Aenderungen zuerst dort anpassen,
+Vorgehen siehe `EVOLUTION.md` im contracts-Repo.
 
-## Was schon funktioniert (Ende-zu-Ende getestet)
+## Funktionen
 
-- `GET /health` (oeffentlich)
-- `GET /history`, `GET /export?format=json|csv`
-- Login-Pruefung per Bearer-Token, **inklusive vollstaendiger
-  Signaturpruefung** (RS256 gegen die JWKS von Keycloak, siehe `app/auth.py`)
-- Ressourcenbasiert: History-Eintraege werden nach `sub`-Claim gefiltert,
-  jeder Benutzer sieht nur seine eigene History
-- Hintergrund-Consumer (`app/consumer.py`) konsumiert Task-Events vom
-  Fanout-Exchange `task-events` (eigene, exklusive Queue - wie beim
-  Fanout-Beispiel im [M321-Demo-Projekt](https://github.com/LevinWiederkehr/M321_Basic_Setup)) und fuellt die History live
-
-## Was noch fehlt (TODO fuer die Weiterentwicklung)
-
-- Persistenz: `app/store.py` haelt alles nur im Arbeitsspeicher (weg beim
-  Neustart, und der Consumer verpasst alles, was waehrend eines Unterbruchs
-  published wurde - bewusstes Fanout-Verhalten, siehe [M321-Demo-Projekt](https://github.com/LevinWiederkehr/M321_Basic_Setup) fuer
-  die Diskussion). Fuer eine echte History TODO: Persistenz + idempotente
-  Verarbeitung ueber `eventId` (Events koennten doppelt ankommen).
-- Pagination/Filterung bei `/history` (z.B. nach Zeitraum, Task-ID).
-- Weitere Export-Formate/Optionen bei Bedarf (PDF? Zeitraum-Filter?).
-- Tests (aktuell keine automatisierten Tests vorhanden).
+- `GET /health` (oeffentlich: DB-Status, Consumer-Status, antwortende Instanz)
+- `GET /v1/history`, `GET /v1/export?format=json|csv`
+- `/history`, `/export` ohne Version: **deprecated** Alias aus 1.0.0 (Header `Deprecation: true`)
+- **Authentifizierung**: Bearer-Token mit Signaturpruefung (RS256 gegen die
+  Keycloak-JWKS, Key-Rotation wird erkannt), Issuer und Ablaufzeit
+- **Autorisierung**: ressourcenbasiert ueber den `sub`-Claim
+- **Fehlerformat** gemaess Vertrag: `{"error": ..., "correlationId": ...}`
+- **Asynchron + entkoppelt**: durable Queue `history-export-service.task-events`
+  am Fanout-Exchange - Events bleiben liegen, waehrend der Service weg ist
+- **Idempotent**: at-least-once-Zustellung, Duplikate werden ueber `eventId`
+  verworfen (Primary Key in PostgreSQL)
+- **Tolerant Reader**: unbekannte Felder werden ignoriert, fehlende optionale
+  Felder bekommen Defaults, unbekannte `schemaVersion`/`eventType` werden
+  uebersprungen statt die Queue zu blockieren (`app/events.py`)
+- **Zustandslos + skalierbar**: Daten in PostgreSQL, beliebig viele Instanzen
+  hinter nginx (Round-Robin, dynamisch per Docker-DNS), Competing Consumers
+  auf derselben Queue
+- **Resilienz**: Reconnect mit exponentiellem Backoff (RabbitMQ), Requeue bei
+  DB-Ausfall, 503 statt Timeout wenn DB/Keycloak weg sind, Timeouts + Retry
+  auf andere Instanz im Load-Balancer, Graceful Shutdown des Consumers
+- **Observability**: Korrelations-ID aus Request-Header bzw. Event, JSON-Logs
+  (CLEF) inkl. Instanz-Name, zentral in Seq
 
 ## Struktur
 
 | Datei | Zweck |
 | --- | --- |
-| `app/main.py` | FastAPI-App, REST-Endpoints |
-| `app/auth.py` | Access-Token pruefen (Bearer, mit Signaturpruefung) |
-| `app/consumer.py` | Hintergrund-Thread, konsumiert Task-Events per AMQP/pika |
-| `app/store.py` | Thread-sicherer In-Memory-Speicher |
+| `app/main.py` | FastAPI-App, REST-Endpoints, Middleware (Correlation-ID, Request-Log), Fehlerformat |
+| `app/models.py` | API-DTOs gemaess Vertrag (getrennt vom Speichermodell) |
+| `app/events.py` | Event lesen nach Tolerant-Reader-Prinzip |
+| `app/consumer.py` | AMQP-Consumer (pika): durable Queue, Ack/Nack, Idempotenz, Reconnect |
+| `app/store.py` | PostgreSQL-Store (idempotent) bzw. In-Memory fuer lokale Entwicklung/Tests |
+| `app/auth.py` | Token-Pruefung (Bearer, Signatur, Issuer) |
+| `app/observability.py` | JSON-Logging, Korrelations-ID, Versand an Seq |
+| `app/ui.py`, `app/static/` | Kleine Web-Oberflaeche fuer das Gesamtsystem |
+| `tests/` | pytest: Vertrag, Tolerant Reader, Idempotenz, Consumer-Verhalten |
+| `docker-compose.yml`, `nginx.conf` | Service + eigene DB + Load-Balancer |
 
 ## Starten
 
-Voraussetzung: gemeinsame Infrastruktur laeuft (siehe
-[`task-management-contracts/README.md`](https://github.com/LevinWiederkehr/task-management-contracts#readme)).
-
-Am einfachsten per `start.cmd` (richtet beim ersten Mal die venv ein). Laeuft
-der Delphi-Task-Service nicht auf 8090, dessen Port mitgeben - z.B. wenn 8090
-belegt ist und der Task-Service mit `start.cmd 8095` gestartet wurde:
+**Gesamtsystem**: `start-all.ps1` im contracts-Repo (startet auch diesen
+Service in Docker). Nur dieser Service (gemeinsame Infra muss laufen):
 
 ```
-start.cmd 8095
+docker compose up -d --build                  # 2 Instanzen + Postgres + nginx auf :8091
+docker compose up -d --scale history=4        # hochskalieren, ohne Unterbruch
 ```
 
-Oder manuell:
+Lokale Entwicklung ohne Docker (In-Memory, eigene temporaere Queue - nimmt
+den Docker-Instanzen also keine Events weg):
 
 ```
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 8091
+start.cmd [Port des Delphi-Task-Service]
 ```
 
-Konfiguration per Umgebungsvariable (Defaults passen zur gemeinsamen Infra):
+| Adresse | Was |
+| --- | --- |
+| http://localhost:8091/ui | Web-Oberflaeche (Login `levin`/`levin123`) |
+| http://localhost:8091/docs | Swagger UI (von FastAPI generiert) |
+
+Konfiguration per Umgebungsvariable:
 
 | Variable | Default |
 | --- | --- |
-| `PORT` | `8091` (nur im Docker-Image relevant, lokal per `--port` an uvicorn) |
+| `PORT` | `8091` (nur im Docker-Image, lokal per `--port`) |
+| `DATABASE_URL` | leer = In-Memory; Docker: `postgresql://history:history@history-db:5432/history` |
 | `RABBITMQ_HOST` / `RABBITMQ_PORT` | `localhost` / `5672` |
-| `OIDC_JWKS_URL` | `http://localhost:8082/realms/task-mgmt/protocol/openid-connect/certs` |
+| `RABBITMQ_USER` / `RABBITMQ_PASS` | `guest` / `guest` |
 | `OIDC_ISSUER` | `http://localhost:8082/realms/task-mgmt` |
+| `OIDC_JWKS_URL` | `<Issuer>/protocol/openid-connect/certs` auf localhost:8082 |
+| `OIDC_TOKEN_URL` | `<Issuer>/protocol/openid-connect/token` (nur fuer den UI-Login) |
 | `TASK_SERVICE_URL` | `http://localhost:8090` (nur fuer die Web-Oberflaeche) |
+| `SEQ_URL` | leer (kein Versand); Docker: `http://seq:80` |
+| `START_CONSUMER` | `true` (`false` in Tests) |
 
-## Web-Oberflaeche
-
-http://localhost:8091/ui - kleine Testoberflaeche fuer das Gesamtsystem
-(nicht Teil des Vertrags, deshalb nicht in `/docs`):
-
-- Login per Benutzername/Passwort (Demo-User aus Keycloak)
-- Aufgaben anlegen, erledigen, loeschen - direkt ueber den **Delphi-Task-Service**
-  (muss laufen; die Seite sucht ihn automatisch auf 8090 und 8095, andere Ports
-  per `TASK_SERVICE_URL` bzw. `start.cmd <Port>`)
-- History + CSV-Export aus diesem Service; jede Aenderung an einer Aufgabe
-  erscheint hier, nachdem das Event ueber RabbitMQ angekommen ist
-
-## Manuell testen
+## Tests und Lint
 
 ```
-# Token holen (siehe task-management-contracts/README.md fuer Demo-User)
-curl -X POST http://localhost:8082/realms/task-mgmt/protocol/openid-connect/token \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  -d "grant_type=password&client_id=task-mgmt-client&username=levin&password=levin123"
-
-# History abrufen (access_token aus der Antwort oben einsetzen)
-curl http://localhost:8091/history -H "Authorization: Bearer <token>"
-curl "http://localhost:8091/export?format=csv" -H "Authorization: Bearer <token>"
+pip install -r requirements-dev.txt
+ruff check .
+pytest
 ```
 
-Automatische API-Doku (Swagger UI, von FastAPI generiert): http://localhost:8091/docs
+Laeuft bei jedem Push in GitHub Actions (`.github/workflows/ci.yml`, inkl.
+Docker-Build). End-to-End-Test des Gesamtsystems: `scripts/e2e-test.ps1`
+im contracts-Repo.
