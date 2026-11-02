@@ -33,6 +33,7 @@
   .badge { font-size:12px; padding:1px 8px; border-radius:99px; border:1px solid var(--line); }
   .badge.DONE { color:var(--ok); }
   .badge.DELETED { color:var(--err); }
+  .sim { font-size:13px; padding:8px 10px; border-radius:6px; margin-bottom:8px; background:color-mix(in srgb, var(--accent) 12%, transparent); }
   .hidden { display:none; }
 </style>
 </head>
@@ -57,7 +58,8 @@
     </section>
 
     <section class="card">
-      <div class="row head"><strong>Aufgaben</strong> <small>Task-Service (Delphi)</small></div>
+      <div class="row head"><strong>Aufgaben</strong> <small id="task-source"></small></div>
+      <div id="sim-note" class="sim hidden">Simulationsmodus: Der Delphi-Task-Service ist nicht erreichbar, deshalb übernimmt der Python-Service seine Rolle und schickt dieselben Events über RabbitMQ.</div>
       <form id="task-form" class="row" style="margin-bottom:8px">
         <input id="title" placeholder="Neue Aufgabe" required>
         <button type="submit">Hinzufügen</button>
@@ -91,6 +93,7 @@
 <script>
 let token = null;
 let taskServiceUrl = "http://localhost:8090";
+let tasksBase = taskServiceUrl; // Delphi oder /ui/sim (Simulationsmodus)
 const $ = (id) => document.getElementById(id);
 
 function el(tag, attrs = {}, ...children) {
@@ -107,9 +110,7 @@ async function call(url, options = {}) {
       headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
     });
   } catch {
-    throw new Error(url.startsWith(taskServiceUrl)
-      ? `Task-Service (Delphi) nicht erreichbar unter ${taskServiceUrl} - läuft er?`
-      : "Service nicht erreichbar");
+    throw new Error("Service nicht erreichbar");
   }
   if (res.status === 401 && token) { logout("Sitzung abgelaufen, bitte neu anmelden."); throw new Error(""); }
   if (!res.ok) {
@@ -118,7 +119,20 @@ async function call(url, options = {}) {
   }
   return res;
 }
-const tasksApi = (path, options) => call(taskServiceUrl + path, options);
+const tasksApi = (path, options) => call(tasksBase + path, options);
+
+// Prueft, ob wirklich der Delphi-Task-Service antwortet (und nicht ein
+// anderes Programm auf demselben Port) - sonst Simulationsmodus.
+async function detectTaskService() {
+  let delphi = false;
+  try {
+    const res = await fetch(taskServiceUrl + "/health", { signal: AbortSignal.timeout(2000) });
+    delphi = res.ok && (await res.json()).status === "UP";
+  } catch {}
+  tasksBase = delphi ? taskServiceUrl : "/ui/sim";
+  $("task-source").textContent = delphi ? `Task-Service (Delphi, ${taskServiceUrl})` : "Simulationsmodus (Python)";
+  $("sim-note").classList.toggle("hidden", delphi);
+}
 
 function logout(message = "") {
   token = null;
@@ -181,6 +195,7 @@ $("login-form").addEventListener("submit", async (ev) => {
     $("password").value = "";
     $("login").classList.add("hidden");
     $("app").classList.remove("hidden");
+    await detectTaskService();
     loadTasks();
     loadHistory();
   } catch (err) { $("login-error").textContent = err.message; }
@@ -201,7 +216,7 @@ $("csv").addEventListener("click", async () => {
   } catch (err) { $("history-error").textContent = err.message; }
 });
 
-$("refresh").addEventListener("click", () => { loadTasks(); loadHistory(); });
+$("refresh").addEventListener("click", async () => { await detectTaskService(); loadTasks(); loadHistory(); });
 $("logout").addEventListener("click", () => logout());
 
 fetch("/ui/config").then((r) => r.json()).then((c) => { taskServiceUrl = c.taskServiceUrl; }).catch(() => {});
