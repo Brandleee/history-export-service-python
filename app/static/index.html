@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Task Manager</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2129; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; --err:#dc2626; --ok:#16a34a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#111418; --card:#1b1f24; --text:#e6e8eb; --muted:#9aa3ad; --line:#2c323a; --accent:#5b8def; --err:#f87171; --ok:#4ade80; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:15px/1.5 system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width:860px; margin:0 auto; padding:24px 16px; }
+  h1 { font-size:22px; margin:0 0 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin-bottom:16px; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; align-items:center; }
+  .head { margin-bottom:8px; }
+  .head small { color:var(--muted); }
+  input { flex:1; min-width:140px; padding:8px 10px; border:1px solid var(--line); border-radius:6px; background:var(--bg); color:var(--text); font:inherit; }
+  button { padding:8px 14px; border:0; border-radius:6px; background:var(--accent); color:#fff; font:inherit; cursor:pointer; }
+  button.secondary { background:transparent; color:var(--accent); border:1px solid var(--line); }
+  button.small { padding:3px 10px; font-size:13px; }
+  .muted { color:var(--muted); }
+  .error { color:var(--err); }
+  .error:empty { display:none; }
+  .table-wrap { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:left; padding:8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { font-weight:600; color:var(--muted); font-size:13px; }
+  td.title { white-space:normal; width:100%; }
+  tr.done td.title { text-decoration:line-through; color:var(--muted); }
+  .badge { font-size:12px; padding:1px 8px; border-radius:99px; border:1px solid var(--line); }
+  .badge.DONE { color:var(--ok); }
+  .badge.DELETED { color:var(--err); }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Task Manager</h1>
+
+  <section id="login" class="card">
+    <form id="login-form" class="row">
+      <input id="username" placeholder="Benutzername" value="levin" autocomplete="username">
+      <input id="password" type="password" placeholder="Passwort" autocomplete="current-password">
+      <button type="submit">Anmelden</button>
+    </form>
+    <div id="login-error" class="error" style="margin-top:8px"></div>
+  </section>
+
+  <div id="app" class="hidden">
+    <section class="card row">
+      <span>Angemeldet als <strong id="who"></strong></span>
+      <span style="flex:1"></span>
+      <button class="secondary" id="logout">Abmelden</button>
+    </section>
+
+    <section class="card">
+      <div class="row head"><strong>Aufgaben</strong> <small>Task-Service (Delphi)</small></div>
+      <form id="task-form" class="row" style="margin-bottom:8px">
+        <input id="title" placeholder="Neue Aufgabe" required>
+        <button type="submit">Hinzufügen</button>
+      </form>
+      <div class="table-wrap">
+        <table><tbody id="tasks"></tbody></table>
+      </div>
+      <div id="tasks-empty" class="muted hidden">Keine Aufgaben.</div>
+      <div id="tasks-error" class="error"></div>
+    </section>
+
+    <section class="card">
+      <div class="row head">
+        <strong>History</strong> <small>History/Export-Service (Python)</small>
+        <span style="flex:1"></span>
+        <button class="secondary small" id="refresh">Aktualisieren</button>
+        <button class="secondary small" id="csv">CSV herunterladen</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Zeitpunkt</th><th>Event</th><th>Titel</th><th>Status</th></tr></thead>
+          <tbody id="history"></tbody>
+        </table>
+      </div>
+      <div id="history-empty" class="muted hidden">Noch keine Einträge.</div>
+      <div id="history-error" class="error"></div>
+    </section>
+  </div>
+</main>
+
+<script>
+let token = null;
+let taskServiceUrl = "http://localhost:8090";
+const $ = (id) => document.getElementById(id);
+
+function el(tag, attrs = {}, ...children) {
+  const node = Object.assign(document.createElement(tag), attrs);
+  node.append(...children);
+  return node;
+}
+
+async function call(url, options = {}) {
+  let res;
+  try {
+    res = await fetch(url, {
+      ...options,
+      headers: { "Content-Type": "application/json", ...(token ? { Authorization: "Bearer " + token } : {}) },
+    });
+  } catch {
+    throw new Error(url.startsWith(taskServiceUrl)
+      ? `Task-Service (Delphi) nicht erreichbar unter ${taskServiceUrl} - läuft er?`
+      : "Service nicht erreichbar");
+  }
+  if (res.status === 401 && token) { logout("Sitzung abgelaufen, bitte neu anmelden."); throw new Error(""); }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error || body.detail || res.statusText);
+  }
+  return res;
+}
+const tasksApi = (path, options) => call(taskServiceUrl + path, options);
+
+function logout(message = "") {
+  token = null;
+  $("app").classList.add("hidden");
+  $("login").classList.remove("hidden");
+  $("login-error").textContent = message;
+}
+
+async function loadTasks() {
+  $("tasks-error").textContent = "";
+  try {
+    const tasks = await (await tasksApi("/tasks")).json();
+    $("tasks").replaceChildren(...tasks.map((t) => {
+      const done = t.status === "DONE";
+      const toggle = el("button", { className: "secondary small", textContent: done ? "Wieder öffnen" : "Erledigt" });
+      toggle.onclick = () => taskAction(`/tasks/${t.id}`, "PUT", { status: done ? "OPEN" : "DONE" });
+      const del = el("button", { className: "secondary small", textContent: "Löschen" });
+      del.onclick = () => taskAction(`/tasks/${t.id}`, "DELETE");
+      return el("tr", { className: done ? "done" : "" },
+        el("td", { className: "title", textContent: t.title }),
+        el("td", {}, el("span", { className: "badge " + t.status, textContent: t.status })),
+        el("td", {}, toggle, " ", del));
+    }));
+    $("tasks-empty").classList.toggle("hidden", tasks.length > 0);
+  } catch (err) { $("tasks-error").textContent = err.message; }
+}
+
+async function loadHistory() {
+  $("history-error").textContent = "";
+  try {
+    const entries = await (await call("/history")).json();
+    $("history").replaceChildren(...entries.map((e) => el("tr", {},
+      el("td", { textContent: new Date(e.occurredAt).toLocaleString("de-CH") }),
+      el("td", { textContent: e.eventType }),
+      el("td", { className: "title", textContent: e.title }),
+      el("td", {}, el("span", { className: "badge " + e.status, textContent: e.status })))));
+    $("history-empty").classList.toggle("hidden", entries.length > 0);
+  } catch (err) { $("history-error").textContent = err.message; }
+}
+
+async function taskAction(path, method, body) {
+  $("tasks-error").textContent = "";
+  try {
+    await tasksApi(path, { method, body: body && JSON.stringify(body) });
+    await loadTasks();
+    setTimeout(loadHistory, 400); // Event laeuft asynchron ueber RabbitMQ
+  } catch (err) { $("tasks-error").textContent = err.message; }
+}
+
+$("login-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  $("login-error").textContent = "";
+  try {
+    const res = await call("/ui/login", {
+      method: "POST",
+      body: JSON.stringify({ username: $("username").value, password: $("password").value }),
+    });
+    token = (await res.json()).access_token;
+    $("who").textContent = $("username").value;
+    $("password").value = "";
+    $("login").classList.add("hidden");
+    $("app").classList.remove("hidden");
+    loadTasks();
+    loadHistory();
+  } catch (err) { $("login-error").textContent = err.message; }
+});
+
+$("task-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  await taskAction("/tasks", "POST", { title: $("title").value });
+  $("title").value = "";
+});
+
+$("csv").addEventListener("click", async () => {
+  try {
+    const blob = await (await call("/export?format=csv")).blob();
+    const a = el("a", { href: URL.createObjectURL(blob), download: "history.csv" });
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch (err) { $("history-error").textContent = err.message; }
+});
+
+$("refresh").addEventListener("click", () => { loadTasks(); loadHistory(); });
+$("logout").addEventListener("click", () => logout());
+
+fetch("/ui/config").then((r) => r.json()).then((c) => { taskServiceUrl = c.taskServiceUrl; }).catch(() => {});
+</script>
+</body>
+</html>
