@@ -1,0 +1,63 @@
+# History/Export-Service mit eigener Datenbank (Database per Service) und
+# Load-Balancer. Haengt sich an das gemeinsame Netzwerk "task-mgmt-net" aus
+# dem contracts-Repo (Keycloak, RabbitMQ, Seq) - das muss vorher laufen.
+#
+#   docker compose up -d --build                      (2 Instanzen, Default)
+#   docker compose up -d --scale history=4            (hochskalieren, ohne Unterbruch)
+#
+# Erreichbar ueber den Load-Balancer: http://localhost:8091 (UI: /ui, API-Doku: /docs)
+name: history-export-service
+
+services:
+  history-db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: history
+      POSTGRES_USER: history
+      POSTGRES_PASSWORD: history
+    volumes:
+      - history-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U history -d history"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  history:
+    build: .
+    image: history-export-service:latest
+    environment:
+      DATABASE_URL: postgresql://history:history@history-db:5432/history
+      RABBITMQ_HOST: rabbitmq
+      # Tokens tragen den oeffentlichen Issuer (localhost:8082), die Schluessel holt
+      # der Container aber intern direkt bei Keycloak.
+      OIDC_ISSUER: http://localhost:8082/realms/task-mgmt
+      OIDC_JWKS_URL: http://keycloak:8080/realms/task-mgmt/protocol/openid-connect/certs
+      OIDC_TOKEN_URL: http://keycloak:8080/realms/task-mgmt/protocol/openid-connect/token
+      TASK_SERVICE_URL: ${TASK_SERVICE_URL:-http://localhost:8090}
+      SEQ_URL: http://seq:80
+    deploy:
+      replicas: ${HISTORY_REPLICAS:-2}
+    depends_on:
+      history-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  history-lb:
+    image: nginx:1.27-alpine
+    ports:
+      - "${HISTORY_PORT:-8091}:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - history
+    restart: unless-stopped
+
+volumes:
+  history-db-data:
+
+networks:
+  default:
+    name: task-mgmt-net
+    external: true
