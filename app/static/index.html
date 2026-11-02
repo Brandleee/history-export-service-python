@@ -57,7 +57,7 @@
     </section>
 
     <section class="card">
-      <div class="row head"><strong>Aufgaben</strong> <small>Task-Service (Delphi)</small></div>
+      <div class="row head"><strong>Aufgaben</strong> <small id="task-source">Task-Service (Delphi)</small></div>
       <form id="task-form" class="row" style="margin-bottom:8px">
         <input id="title" placeholder="Neue Aufgabe" required>
         <button type="submit">Hinzufügen</button>
@@ -91,6 +91,7 @@
 <script>
 let token = null;
 let taskServiceUrl = "http://localhost:8090";
+let taskServiceCandidates = [taskServiceUrl];
 const $ = (id) => document.getElementById(id);
 
 function el(tag, attrs = {}, ...children) {
@@ -108,7 +109,7 @@ async function call(url, options = {}) {
     });
   } catch {
     throw new Error(url.startsWith(taskServiceUrl)
-      ? `Task-Service (Delphi) nicht erreichbar unter ${taskServiceUrl}. Läuft er? Anderer Port: diesen Service mit start.cmd <Port> starten.`
+      ? `Task-Service (Delphi) nicht erreichbar (gesucht unter ${taskServiceCandidates.join(", ")}). Läuft er? Anderer Port: diesen Service mit start.cmd <Port> starten.`
       : "Service nicht erreichbar");
   }
   if (res.status === 401 && token) { logout("Sitzung abgelaufen, bitte neu anmelden."); throw new Error(""); }
@@ -119,6 +120,22 @@ async function call(url, options = {}) {
   return res;
 }
 const tasksApi = (path, options) => call(taskServiceUrl + path, options);
+
+// Sucht den Delphi-Task-Service unter den bekannten Adressen. Prueft per /health,
+// dass wirklich er antwortet - auf 8090 kann auch ein anderes Programm laufen.
+async function findTaskService() {
+  for (const url of taskServiceCandidates) {
+    try {
+      const res = await fetch(url + "/health", { signal: AbortSignal.timeout(1500) });
+      if (res.ok && (await res.json()).service === "task-service-delphi") {
+        taskServiceUrl = url;
+        $("task-source").textContent = `Task-Service (Delphi, ${url})`;
+        return;
+      }
+    } catch {}
+  }
+  $("task-source").textContent = "Task-Service (Delphi)";
+}
 
 function logout(message = "") {
   token = null;
@@ -181,6 +198,7 @@ $("login-form").addEventListener("submit", async (ev) => {
     $("password").value = "";
     $("login").classList.add("hidden");
     $("app").classList.remove("hidden");
+    await findTaskService();
     loadTasks();
     loadHistory();
   } catch (err) { $("login-error").textContent = err.message; }
@@ -201,10 +219,13 @@ $("csv").addEventListener("click", async () => {
   } catch (err) { $("history-error").textContent = err.message; }
 });
 
-$("refresh").addEventListener("click", () => { loadTasks(); loadHistory(); });
+$("refresh").addEventListener("click", async () => { await findTaskService(); loadTasks(); loadHistory(); });
 $("logout").addEventListener("click", () => logout());
 
-fetch("/ui/config").then((r) => r.json()).then((c) => { taskServiceUrl = c.taskServiceUrl; }).catch(() => {});
+fetch("/ui/config").then((r) => r.json()).then((c) => {
+  taskServiceCandidates = c.taskServiceUrls;
+  taskServiceUrl = c.taskServiceUrls[0];
+}).catch(() => {});
 </script>
 </body>
 </html>
