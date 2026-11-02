@@ -1,14 +1,4 @@
-"""Kleine Web-Oberflaeche fuer das Gesamtsystem (http://localhost:8091/ui).
 
-Aufgaben werden direkt im Browser ueber den Delphi-Task-Service verwaltet
-(der erlaubt CORS); dessen Events landen per RabbitMQ in der History, die die
-Seite von diesem Service liest.
-
-Nicht Teil des Vertrags (contracts/openapi/history-export-service.yaml) - die
-Routen sind deshalb aus der OpenAPI-Doku ausgeblendet. /ui/login leitet den
-Login an Keycloak weiter, weil Keycloak keine Anfragen direkt aus dem Browser
-erlaubt (kein CORS fuer den Client).
-"""
 
 import os
 from pathlib import Path
